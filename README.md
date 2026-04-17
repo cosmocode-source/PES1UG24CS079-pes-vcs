@@ -600,3 +600,241 @@ The following questions cover filesystem concepts beyond the implementation scop
 - **Git Internals** (Pro Git book): https://git-scm.com/book/en/v2/Git-Internals-Plumbing-and-Porcelain
 - **Git from the inside out**: https://codewords.recurse.com/issues/two/git-from-the-inside-out
 - **The Git Parable**: https://tom.preston-werner.com/2009/05/19/the-git-parable.html
+
+
+
+---
+
+## Implementation Notes
+
+> **Note:** `tree_from_index` is implemented in `index.c` (not `tree.c`) to avoid a linker error in the `test_tree` binary. The `test_tree` binary links only `tree.o + object.o`, so placing `tree_from_index` (which calls `index_load`) in `tree.c` would cause an undefined reference at link time. The declaration in `tree.h` is unchanged — only the definition location differs.
+
+> **Stack Overflow Fix:** The `Index` struct is ~5.6 MB (10,000 entries × 568 bytes). Placing it on the call stack causes a segmentation fault. To fix this without modifying `pes.h`, `index.h`, or `pes.c`, two static global buffers (`g_index_buf` and `g_sorted_entries`) in `index.c` absorb the large allocations in BSS (static memory) instead of the stack.
+
+---
+
+## Lab Report
+
+### Phase 1 — Object Storage
+
+**Screenshot 1A** — `./test_objects` output:
+
+```
+Stored blob with hash: d58213f5dbe0...
+Object stored at: .pes/objects/d5/8213f5...
+PASS: blob storage
+PASS: deduplication
+PASS: integrity check
+
+All Phase 1 tests passed.
+```
+
+> **How to capture:** Run `./test_objects` after `make all`. Paste or screenshot the terminal output.
+
+**Screenshot 1B** — Sharded object directory:
+
+```
+$ find .pes/objects -type f
+.pes/objects/d5/8213f5dbe0629b5c2fa28e5c7d4213ea09227ed0221bbe9db5e5c4b9aafc12
+```
+
+> **How to capture:** After running `./test_objects`, run `find .pes/objects -type f` and screenshot the result.
+
+---
+
+### Phase 2 — Tree Objects
+
+**Screenshot 2A** — `./test_tree` output:
+
+```
+Serialized tree: 139 bytes
+PASS: tree serialize/parse roundtrip
+PASS: tree deterministic serialization
+
+All Phase 2 tests passed.
+```
+
+> **How to capture:** Run `./test_tree` after `make all`. Paste or screenshot the terminal output.
+
+**Screenshot 2B** — Raw binary tree object (xxd):
+
+```
+$ find .pes/objects -type f   # pick any hash shown
+$ xxd .pes/objects/XX/YYY... | head -20
+```
+
+> **How to capture:** After `./test_tree`, run `find .pes/objects -type f` to find a tree object, then run `xxd <path> | head -20`. Screenshot that output. The binary format shows `<mode> <name>\0<32-raw-bytes>` per entry.
+
+---
+
+### Phase 3 — Staging Area (Index)
+
+**Screenshot 3A** — `pes init` → `pes add` → `pes status` sequence:
+
+```
+$ ./pes init
+Initialized empty PES repository in .pes/
+
+$ echo "hello" > file1.txt
+$ echo "world" > file2.txt
+$ ./pes add file1.txt file2.txt
+$ ./pes status
+Staged changes:
+  staged:     file1.txt
+  staged:     file2.txt
+
+Unstaged changes:
+  (nothing to show)
+
+Untracked files:
+  (nothing to show)
+```
+
+> **How to capture:** Run the commands above in sequence and screenshot the terminal.
+
+**Screenshot 3B** — Raw index file content:
+
+```
+$ cat .pes/index
+100644 <hex-hash> <mtime> <size> file1.txt
+100644 <hex-hash> <mtime> <size> file2.txt
+```
+
+> **How to capture:** After `pes add`, run `cat .pes/index` and screenshot. You will see one line per staged file in the text format: `<mode-octal> <sha256-hex> <mtime> <size> <path>`.
+
+---
+
+### Phase 4 — Commits and History
+
+**Screenshot 4A** — `pes log` showing three commits:
+
+```
+$ ./pes log
+commit d273b905...
+Author: Your Name <SRN>
+Date:   1776450630
+
+    Add farewell
+
+commit 1c135ffc...
+Author: Your Name <SRN>
+Date:   1776450630
+
+    Update file.txt
+
+commit b4198f66...
+Author: Your Name <SRN>
+Date:   1776450630
+
+    Initial commit
+```
+
+> **How to capture:** After running the three-commit sequence below, run `./pes log` and screenshot.
+
+```bash
+export PES_AUTHOR="Your Name <PESXUG24CSYYY>"
+./pes init
+echo "Hello" > hello.txt
+./pes add hello.txt
+./pes commit -m "Initial commit"
+
+echo "World" >> hello.txt
+./pes add hello.txt
+./pes commit -m "Update file.txt"
+
+echo "Goodbye" > bye.txt
+./pes add bye.txt
+./pes commit -m "Add farewell"
+
+./pes log
+```
+
+**Screenshot 4B** — Object store growth after three commits:
+
+```
+$ find .pes -type f | sort
+.pes/HEAD
+.pes/index
+.pes/objects/...  (10 objects: 3 commits + 3 trees + blobs)
+.pes/refs/heads/main
+```
+
+> **How to capture:** After the three commits, run `find .pes -type f | sort` and screenshot.
+
+**Screenshot 4C** — Reference chain:
+
+```
+$ cat .pes/HEAD
+ref: refs/heads/main
+
+$ cat .pes/refs/heads/main
+d273b9059cd88b03961dee218ea342582a2e99741930f974825842a0e69d93fb
+```
+
+> **How to capture:** Run both `cat` commands above and screenshot. HEAD contains the symbolic ref; the branch file contains the latest commit hash.
+
+**Final Screenshot** — Full integration test:
+
+```
+$ make test-integration
+=== Running integration tests ===
+...
+=== All integration tests completed ===
+```
+
+> **How to capture:** Run `make test-integration` and screenshot the full output.
+
+---
+
+## Analysis Questions
+
+### Q5.1 — How would you implement `pes checkout <branch>`?
+
+To switch branches, three things must happen in `.pes/`:
+
+1. **Read the target branch's commit hash** from `.pes/refs/heads/<branch>`, then walk its tree to get the full file list and their blob hashes.
+2. **Update the working directory** — for every file in the target tree, read the blob from `.pes/objects/` and write it to disk. Files not present in the target tree must be deleted.
+3. **Update HEAD** — write `ref: refs/heads/<branch>` into `.pes/HEAD`.
+
+What makes this complex: the working directory update is not atomic. If a power failure occurs mid-way, the working directory is in an inconsistent mixed state. Git handles this with a lock file (`.git/index.lock`) and by updating the index and working tree incrementally, rolling back on failure. Additionally, creating directories for nested paths (e.g., `src/main.c` requires `src/` to exist first) must be done in the right order.
+
+### Q5.2 — How would you detect a "dirty working directory" conflict during checkout?
+
+For each file in the current index:
+1. Re-stat the file on disk and compare `mtime` and `size` to the index entry (fast path).
+2. If metadata differs, re-hash the file and compare the SHA-256 to the stored blob hash (slow path for certainty).
+3. If the hash differs, the file is locally modified.
+
+Then compare the current index hash for that file against what the target branch's tree has for the same path. If the file is both locally modified AND differs between branches, checkout must refuse and print an error (just like Git's "Your local changes to the following files would be overwritten by checkout").
+
+Files that are locally modified but identical between the two branches can be safely ignored — the user's local edit survives the switch.
+
+### Q5.3 — What happens in detached HEAD, and how do you recover?
+
+In detached HEAD, `.pes/HEAD` contains a raw commit hash instead of `ref: refs/heads/main`. Any new commits advance HEAD directly (rewriting the hash in HEAD) but no branch pointer moves, so those commits are reachable only from HEAD. If you then switch branches or reinitialize, HEAD gets overwritten and those commits become unreferenced — not deleted immediately, but invisible to `pes log` and eventually collected by garbage collection.
+
+Recovery: if you still have the hash (from terminal history or a note), run `pes checkout -b recovery-branch <hash>` (create a new branch pointing at that commit). In our PES-VCS without that command, you would manually write the hash into `.pes/refs/heads/recovery` and update HEAD to point to it.
+
+### Q6.1 — Algorithm to find and delete unreachable objects
+
+This is a mark-and-sweep:
+
+1. **Mark phase** — collect all reachable hashes. Start from every branch in `.pes/refs/heads/`. For each branch, walk the commit chain following `parent` pointers. For each commit, add its tree hash to the reachable set, then recursively add every blob and subtree that tree points to. Use a `HashSet` (hash table or sorted array of 32-byte hashes) to track visited objects and avoid re-visiting.
+2. **Sweep phase** — walk every file in `.pes/objects/XX/YYY...`. If its hash (reconstructed from the path) is not in the reachable set, delete it.
+
+For 100,000 commits and 50 branches: assuming an average of 100 files per commit, you visit roughly 100,000 commits × 1 tree + 100,000 × 100 blobs = ~10 million object hash lookups. With a hash set, each lookup is O(1), so the total is linear in the number of objects — easily feasible.
+
+### Q6.2 — Race condition between GC and a concurrent commit
+
+The race:
+
+1. Thread A (committing) calls `object_write` for a new blob `B`. The blob is written to disk but the commit object referencing it has not been written yet — so no branch points to `B`.
+2. Thread B (GC) runs the mark phase. It traverses all branches, finds `B` unreachable (because the commit isn't written yet), and marks it for deletion.
+3. Thread A writes the commit object referencing `B`, then updates the branch ref.
+4. Thread B deletes `B` from the object store.
+
+Now the committed history references a deleted blob — the repository is corrupt.
+
+Git avoids this with a "grace period" approach: GC only deletes objects older than 2 weeks by default (`gc.pruneExpire`). Any object written within that window is considered potentially in-flight and is left alone. A new commit takes milliseconds, so a 2-week grace period makes the race effectively impossible in practice. Additionally, Git uses `.git/gc.pid` lock files to prevent two GC processes from running simultaneously.
+
+---
