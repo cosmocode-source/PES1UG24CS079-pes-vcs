@@ -603,178 +603,46 @@ The following questions cover filesystem concepts beyond the implementation scop
 
 ---
 
----
-
 ## Lab Report
 
 ### Phase 1 — Object Storage
 
-**Screenshot 1A** — `./test_objects` output:
+**Screenshot 1A — All Phase 1 tests passing:**
+![Phase 1 tests](screenshots/1A.png)
 
-```
-Stored blob with hash: d58213f5dbe0...
-Object stored at: .pes/objects/d5/8213f5...
-PASS: blob storage
-PASS: deduplication
-PASS: integrity check
-
-All Phase 1 tests passed.
-```
-
-> **How to capture:** Run `./test_objects` after `make all`. Paste or screenshot the terminal output.
-
-**Screenshot 1B** — Sharded object directory:
-
-```
-$ find .pes/objects -type f
-.pes/objects/d5/8213f5dbe0629b5c2fa28e5c7d4213ea09227ed0221bbe9db5e5c4b9aafc12
-```
-
-> **How to capture:** After running `./test_objects`, run `find .pes/objects -type f` and screenshot the result.
-
----
+**Screenshot 1B — Sharded object directory structure:**
+![Object store structure](screenshots/1B.png)
 
 ### Phase 2 — Tree Objects
 
-**Screenshot 2A** — `./test_tree` output:
+**Screenshot 2A — All Phase 2 tests passing:**
+![Phase 2 tests](screenshots/2A.png)
 
-```
-Serialized tree: 139 bytes
-PASS: tree serialize/parse roundtrip
-PASS: tree deterministic serialization
+**Screenshot 2B — Raw binary tree object (xxd):**
+![Tree binary format](screenshots/2B.png)
 
-All Phase 2 tests passed.
-```
+### Phase 3 — Staging Area
 
-> **How to capture:** Run `./test_tree` after `make all`. Paste or screenshot the terminal output.
+**Screenshot 3A — init → add → status sequence:**
+![Status output](screenshots/3A.png)
 
-**Screenshot 2B** — Raw binary tree object (xxd):
-
-```
-$ find .pes/objects -type f   # pick any hash shown
-$ xxd .pes/objects/XX/YYY... | head -20
-```
-
-> **How to capture:** After `./test_tree`, run `find .pes/objects -type f` to find a tree object, then run `xxd <path> | head -20`. Screenshot that output. The binary format shows `<mode> <name>\0<32-raw-bytes>` per entry.
-
----
-
-### Phase 3 — Staging Area (Index)
-
-**Screenshot 3A** — `pes init` → `pes add` → `pes status` sequence:
-
-```
-$ ./pes init
-Initialized empty PES repository in .pes/
-
-$ echo "hello" > file1.txt
-$ echo "world" > file2.txt
-$ ./pes add file1.txt file2.txt
-$ ./pes status
-Staged changes:
-  staged:     file1.txt
-  staged:     file2.txt
-
-Unstaged changes:
-  (nothing to show)
-
-Untracked files:
-  (nothing to show)
-```
-
-> **How to capture:** Run the commands above in sequence and screenshot the terminal.
-
-**Screenshot 3B** — Raw index file content:
-
-```
-$ cat .pes/index
-100644 <hex-hash> <mtime> <size> file1.txt
-100644 <hex-hash> <mtime> <size> file2.txt
-```
-
-> **How to capture:** After `pes add`, run `cat .pes/index` and screenshot. You will see one line per staged file in the text format: `<mode-octal> <sha256-hex> <mtime> <size> <path>`.
-
----
+**Screenshot 3B — Raw index file contents:**
+![Index file](screenshots/3B.png)
 
 ### Phase 4 — Commits and History
 
-**Screenshot 4A** — `pes log` showing three commits:
+**Screenshot 4A — pes log with three commits:**
+![Commit log](screenshots/4A.png)
 
-```
-$ ./pes log
-commit d273b905...
-Author: Your Name <SRN>
-Date:   1776450630
+**Screenshot 4B — Object store growth after three commits:**
+![Object store](screenshots/4B.png)
 
-    Add farewell
+**Screenshot 4C — HEAD and branch reference chain:**
+![Reference chain](screenshots/4C.png)
 
-commit 1c135ffc...
-Author: Your Name <SRN>
-Date:   1776450630
-
-    Update file.txt
-
-commit b4198f66...
-Author: Your Name <SRN>
-Date:   1776450630
-
-    Initial commit
-```
-
-> **How to capture:** After running the three-commit sequence below, run `./pes log` and screenshot.
-
-```bash
-export PES_AUTHOR="Your Name <PESXUG24CSYYY>"
-./pes init
-echo "Hello" > hello.txt
-./pes add hello.txt
-./pes commit -m "Initial commit"
-
-echo "World" >> hello.txt
-./pes add hello.txt
-./pes commit -m "Update file.txt"
-
-echo "Goodbye" > bye.txt
-./pes add bye.txt
-./pes commit -m "Add farewell"
-
-./pes log
-```
-
-**Screenshot 4B** — Object store growth after three commits:
-
-```
-$ find .pes -type f | sort
-.pes/HEAD
-.pes/index
-.pes/objects/...  (10 objects: 3 commits + 3 trees + blobs)
-.pes/refs/heads/main
-```
-
-> **How to capture:** After the three commits, run `find .pes -type f | sort` and screenshot.
-
-**Screenshot 4C** — Reference chain:
-
-```
-$ cat .pes/HEAD
-ref: refs/heads/main
-
-$ cat .pes/refs/heads/main
-d273b9059cd88b03961dee218ea342582a2e99741930f974825842a0e69d93fb
-```
-
-> **How to capture:** Run both `cat` commands above and screenshot. HEAD contains the symbolic ref; the branch file contains the latest commit hash.
-
-**Final Screenshot** — Full integration test:
-
-```
-$ make test-integration
-=== Running integration tests ===
-...
-=== All integration tests completed ===
-```
-
-> **How to capture:** Run `make test-integration` and screenshot the full output.
+**Final — Full integration test passing:**
+![Integration test](screenshots/Final1.png)
+![Integration test](screenshots/Final2.png)
 
 ---
 
